@@ -1,0 +1,9 @@
+.DS_Store
+ICD/.RData
+ICD/.Rhistory
+ICD/master_calidad.xlsx
+ICD/parametros.xlsx
+ICD/data_evaluada/ecuador_icd3.csv
+ICD/data_procesada/1969-12.csv
+ICD/data_procesada/2024-05.csv
+ICD/fuentes_datos/master_clientes/Maestro_Clientes.csv

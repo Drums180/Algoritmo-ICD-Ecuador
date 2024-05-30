@@ -1,0 +1,252 @@
+---
+title: "Analisis Metricas"
+author: "David Dominguez - A01570975"
+date: "2023-10-17"
+output: html_document
+---
+
+# Llamar Librerias
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(readxl)
+library(openxlsx)
+library(readr)
+library(purrr)
+library(tidyr)
+library(tidyverse)
+```
+
+## Crear df sku
+```{r}
+# Asumiendo que df_actual ya está en el environment
+# Filtrado de df_actual
+df_actual_filtrado <- df_actual %>%
+  filter(!str_detect(`IsEmpty`, "TRUE") & !str_detect(`ProductName`, "Foreign"))
+
+# Creación de df_sku
+df_sku <- df_actual_filtrado %>%
+  group_by(SessionUID, SceneUID, SKU) %>%
+  summarise(Total = n(), .groups = 'drop')
+
+# Visualización de df_sku
+head(df_sku)
+```
+
+## Importar Manual Questions
+```{r message=FALSE, warning=FALSE}
+# Lista todos los archivos en la carpeta fuentes_datos/sku_master
+archivos <- list.files(path = "fuentes_datos/manual_questions", full.names = TRUE)
+
+# Define una función para leer un archivo individual
+leer_archivo <- function(archivo) {
+  extension <- tools::file_ext(archivo)
+  switch(extension,
+         xlsx = read_excel(archivo),
+         XLSX = read_excel(archivo),
+         csv = read_csv(archivo),
+         stop("Formato de archivo no soportado")
+  )
+}
+
+# Lee y combina todos los archivos en la carpeta
+df_mq <- archivos %>%
+  map_dfr(leer_archivo)
+
+# Visualización de df_fmprs
+head(df_mq)
+```
+
+## Importar Master Productos
+```{r}
+# Lista todos los archivos en la carpeta fuentes_datos/sku_master
+archivos <- list.files(path = "fuentes_datos/sku_master", full.names = TRUE)
+
+# Define una función para leer un archivo individual
+leer_archivo <- function(archivo) {
+  extension <- tools::file_ext(archivo)
+  switch(extension,
+         xlsx = read_excel(archivo),
+         XLSX = read_excel(archivo),
+         csv = read_csv(archivo),
+         stop("Formato de archivo no soportado")
+  )
+}
+
+# Lee y combina todos los archivos en la carpeta
+df_fmprs <- archivos %>%
+  map_dfr(leer_archivo)
+
+# Visualización de df_fmprs
+head(df_fmprs)
+```
+
+## Importar de master_icd
+```{r}
+# Importación del archivo Excel
+master_icd <- read_excel("ICD - Indice de Calidad de Data.xlsx", sheet = "Export")
+
+# Visualización de master_icd
+head(master_icd)
+```
+
+## Creación de df_metricas
+```{r message=FALSE, warning=FALSE}
+# Join de df_sku con master_icd
+df_metricas <- df_sku %>%
+  left_join(master_icd, by = "SessionUID")
+
+# Asumiendo que df_scenes ya está en el environment
+# Join de df_metricas con df_scenes según SceneUID
+df_metricas <- df_metricas %>%
+  left_join(select(df_scenes, SceneUID, SubSceneType), by = "SceneUID")
+
+# Join de df_metricas con df_fmprs según SKU ID y SKU
+df_metricas <- df_metricas %>%
+  left_join(df_fmprs, by = c("SKU" = "SKU ID")) 
+
+# Filtrado de registros con ICD mayor o igual a 70
+df_metricas <- df_metricas %>%
+  filter(ICD >= 70)
+
+# Creación de la columna ruta basada en la columna User
+df_metricas <- df_metricas %>%
+  mutate(ruta = if_else(
+    str_sub(User, 1, 4) == "PVTA",
+    str_sub(User, -6, -1),
+    str_sub(User, -5, -1)
+  ))
+
+# Seleccionando y ordenando las columnas específicas
+df_metricas <- df_metricas %>%
+  select(SessionUID,
+         User,
+         ruta,  # Incluir la nueva columna ruta
+         Survey_End_Time = `Survey End Time`,
+         SceneUID,
+         SubSceneType,
+         SKU,
+         Total,
+         ICD,
+         Outlet_Code = `Outlet Code`,
+         Sales_Organization_Code = `salesorganizationcode`,
+         territorio,
+         salesterritorycode,
+         Trade_Channel_Code = `tradechannelcode`,
+         sub_canal_isscom,
+         tamaño,
+         modelo_de_servicio_ruta,
+         Is_Foreign_Product = `Is Foreign Product?`,
+         Manufacturer,
+         Sub_Brand = `Sub Brand`,
+         Normalize_Size = `Normalize Size`,
+         Package_Type = `Package Type`,
+         Product_Group = `Product Group`,
+         Local_Product_Category = `Local Product Category`)
+
+# Visualización de df_metricas actualizado
+head(df_metricas)
+```
+
+# Manual Questions dataframe
+```{r}
+# Define las preguntas de interés
+preguntas_interes <- c(
+  "¿El cliente es enrejado?",
+  "Foto Evidencia Punto de Venta",
+  "¿Tiene exhibidor de Bidón de Competencia (5L-11L)?",
+  "Cantidad de Puertas AC Ejecutadas Bebidas",
+  "Cantidad de Puertas AC Cedidas",
+  "Cantidad de Puertas PEPSI",
+  "Cantidad de puertas BONAFONT",
+  "Cantidad de puertas resto Competencia",
+  "Cantidad de puertas CERVEZA (Heineken, Tecate, etc.)"
+)
+
+# Filtrar solo las preguntas de interés
+df_filtrado <- df_mq %>% 
+  filter(LocalQuestionText %in% preguntas_interes) %>%
+  select(SessionUID, LocalQuestionText, AnswerValue)  # Seleccionar solo las columnas necesarias
+
+# Reestructurar el dataframe
+df_reestructurado <- df_filtrado %>%
+  group_by(SessionUID, LocalQuestionText) %>%  # Agrupar por SessionUID y LocalQuestionText
+  summarise(AnswerValue = first(AnswerValue, order_by = NULL), .groups = 'drop') %>%  # Tomar el primer valor de AnswerValue para cada grupo
+  pivot_wider(names_from = LocalQuestionText, 
+              values_from = AnswerValue)  # Usar pivot_wider para reestructurar los datos
+
+# Visualizar el dataframe reestructurado
+head(df_reestructurado)
+```
+
+
+-----------EXTRACTOS-----------
+# Sabana de Metricas FMPR
+```{r}
+# Guardar archivo
+write.xlsx(df_metricas, "master_metricas.xlsx")
+```
+
+# Sabana de Manual Questions
+```{r}
+# Guardar archivo
+write.xlsx(df_reestructurado, "manual_questions.xlsx")
+```
+
+```{bash}
+df_fmprs
+Importar de fuentes_datos/sku_master y juntar todos los archivos xlsx XLSX o csv que hayan ahi para despues hacer un join usando
+SKU ID = SKU
+para traernos las columnas de 
+Is Foreign Product?
+Manufacturer
+Sub Brand
+Normalize Size 
+Package Type
+Product Group
+Local Product Category
+
+y ponerlas despues SKU en df_metricas
+
+Reporte final - Tradicional
+---------
+Zona
+Subterritorio
+CEDI
+Ruta
+Outlet Code
+canal
+sub canal
+tamaño
+modelo de servicio
+User
+ICD
+SessionUID
+Fecha
+-----------
+scene + subscenettype + skuid + /F + M + P(Normalize Size + Empaque) + R + S*/ + Local Product Category + cantidad de frentes
+
+df_actual
+- por ahora asume que df_actual ya esta en el environment
+- se crea df_sku
+- contar cuantos hay de cada tipo en la columna SKU (agrupar)
+- pero tiene que estar dividido por SceneUID
+- y debe aparecer la columna SessionUID
+- De forma que se vea SessionUID | SceneUID | SKU | Total (Conteo por SKU)
+
+master_icd
+importar excel: ICD - Indice de Calidad de Data.xlsx hoja: Export encontrado en misma carpeta que archivo R
+- ICD
+- SessionUID
+
+df_metricas
+- join de df_sku con master_icd donde se pasen las columnas de: 
+- ICD segun el SessionUID
+- Outlet Code	segun el SessionUID
+- salesorganizationcode	segun el SessionUID
+- tamaño segun el SessionUID
+- tradechannelcode segun el SessionUID
+- (en df_metricas habra solamente un registro por SessionUID pero como nosotros tenemos repeticion en df_sku es necesario que se repitan todas las columnas por cada una de las entradas para que no hayan datos vacios)
+
+- una vez con todas las columnas vamos a filtrar unicamente los registros que tengan un ICD mayor o igual a 70
+```
+

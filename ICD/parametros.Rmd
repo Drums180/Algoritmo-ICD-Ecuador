@@ -1,0 +1,216 @@
+---
+title: "Parametros ICD - Ecuador"
+author: "David Dominguez - A01570975"
+date: "2023-10-12"
+output: html_document
+---
+
+# Librerias
+```{r message=FALSE, warning=FALSE}
+library(missForest)
+library(readxl)
+library(stringi)
+library(openxlsx)
+library(dplyr)
+library(lmtest)
+library(ggplot2)
+library(tidyverse)
+library(cluster)  # Para estadísticas de clustering
+library(factoextra)  # Para visualizaciones de clustering
+library(scales)  # Para escalar los datos
+library(DMwR2)  # Para imputación por KNN
+```
+
+## Función para Ajustar Quartiles
+```{r}
+ajustar_cuartil <- function(x, cuartil) {
+  # Diagnosticar la presencia de valores extremos
+  if(any(is.infinite(x), na.rm = TRUE)) {
+    cat("Valores Inf encontrados en el grupo\n")
+  }
+
+  valor <- quantile(x, cuartil, na.rm = TRUE)
+  # Verificar si el valor calculado es NA o cero
+  if (is.na(valor) || valor == 0) {
+    # Intentar encontrar el mínimo valor no cero, considerando NA
+    valor_no_cero <- min(x[x > 0], na.rm = TRUE)
+    if(is.na(valor_no_cero)) {  # Verifica si no hay valores no cero
+      return(0)  # Devuelve 0 si todos los valores son cero o NA
+    } else {
+      return(valor_no_cero)  # Devuelve el mínimo valor no cero
+    }
+  }
+  return(valor)
+}
+```
+
+## Parametros por Segmento
+```{r message=FALSE, warning=FALSE}
+# Procesamiento del dataframe para calcular cuartiles ajustados directamente en columnas separadas
+clusters_stats <- master_calidad %>%
+  group_by(tipo, agenciabi, actividad, subcanal, tamano) %>%
+  summarise(
+    lower_bound_num_frentes = ajustar_cuartil(num_frentes, 0.25),
+    upper_bound_num_frentes = ajustar_cuartil(num_frentes, 0.75),
+    lower_bound_frentes_toni = ajustar_cuartil(frentes_toni, 0.25),
+    upper_bound_frentes_toni = ajustar_cuartil(frentes_toni, 0.75),
+    lower_bound_frentes_bebidas = ajustar_cuartil(frentes_bebidas, 0.25),
+    upper_bound_frentes_bebidas = ajustar_cuartil(frentes_bebidas, 0.75),
+    lower_bound_enfriador_total_bebidas = ajustar_cuartil(enfriador_total_bebidas, 0.25),
+    upper_bound_enfriador_total_bebidas = ajustar_cuartil(enfriador_total_bebidas, 0.75),
+    lower_bound_enfriador_total_lacteos = ajustar_cuartil(enfriador_total_lacteos, 0.25),
+    upper_bound_enfriador_total_lacteos = ajustar_cuartil(enfriador_total_lacteos, 0.75),
+    lower_bound_Total_Scenes = ajustar_cuartil(Total_Scenes, 0.25),
+    upper_bound_Total_Scenes = ajustar_cuartil(Total_Scenes, 0.75),
+    lower_bound_Ambiente_Scenes = ajustar_cuartil(Ambiente_Scenes, 0.25),
+    upper_bound_Ambiente_Scenes = ajustar_cuartil(Ambiente_Scenes, 0.75),
+    lower_bound_Frio_Scenes = ajustar_cuartil(Frio_Scenes, 0.25),
+    upper_bound_Frio_Scenes = ajustar_cuartil(Frio_Scenes, 0.75),
+    .groups = "drop"  # Controla la agrupación de la salida
+  )
+
+clusters_stats <- clusters_stats %>%
+  mutate(across(everything(), ~ifelse(is.infinite(.), 0, .)))
+
+# Visualizar el resultado
+summary(clusters_stats)
+```
+
+## Metodo del Codo para Preformación de Clusters
+```{r}
+# Limpieza de datos para eliminar NA, NaN y Inf
+clusters_stats_clean <- clusters_stats %>%
+  mutate(across(everything(), ~replace(., is.infinite(.) | is.na(.), 0))) %>%
+  na.omit()  # Elimina cualquier fila que todavía tenga NA
+
+# Asegurarse de que todas las columnas sean numéricas
+clusters_stats_numeric <- clusters_stats_clean %>%
+  select(where(is.numeric)) %>%
+  mutate(across(everything(), ~replace(., is.infinite(.) | is.na(.), 0)))  # Limpieza de Inf y NA
+
+# Escalar los datos
+clusters_stats_scaled <- as.data.frame(scale(clusters_stats_numeric))
+
+# Método del Codo para determinar el número óptimo de clusters
+set.seed(123)  # Establecer una semilla para reproducibilidad
+wss <- sapply(1:15, function(k){
+  kmeans(clusters_stats_scaled, centers = k, nstart = 20)$tot.withinss
+})
+
+# Plot del método del codo
+plot(1:15, wss, type = "b", pch = 19, frame = FALSE, 
+     xlab = "Número de Clusters", ylab = "Suma de Cuadrados Internos (WSS)")
+```
+
+## Creación de Clusters
+```{r}
+# Realizar K-means clustering con el número óptimo de clusters
+# Supongamos que el codo parece estar en k = 3 (ajusta según tu gráfico)
+set.seed(123)
+kmeans_result <- kmeans(clusters_stats_scaled, centers = 7, nstart = 20)
+
+# Añadir la asignación de clusters al dataframe original
+clusters_stats_clean$cluster <- kmeans_result$cluster
+
+# Visualizar los primeros registros para confirmar
+print(head(clusters_stats_clean))
+```
+
+## Imputar Valores Nulos
+```{r}
+# Transformar 0 a NA en las columnas numéricas
+clusters_stats_clean <- clusters_stats_clean %>%
+  mutate(across(where(is.numeric), ~na_if(., 0)))
+
+# Imputar NAs usando la mediana por cluster
+clusters_stats_imputed <- clusters_stats_clean %>%
+  group_by(cluster) %>%
+  mutate(across(where(is.numeric), ~ifelse(is.na(.), median(., na.rm = TRUE), .)))
+
+clusters_stats_imputed <- clusters_stats_imputed %>%
+  group_by(tamano) %>%
+  mutate(across(where(is.numeric), ~ifelse(is.na(.), median(., na.rm = TRUE), .)))
+
+
+clusters_stats_imputed <- clusters_stats_imputed %>%
+  mutate(across(starts_with("upper_bound"), ~ . * 4))
+
+clusters_stats_imputed <- clusters_stats_imputed %>%
+  mutate(lower_bound_Total_Scenes = lower_bound_Total_Scenes + 3)
+
+summary(clusters_stats_imputed)
+```
+
+## Funcion para Eliminar Outliers
+```{r}
+is_outlier <- function(x) {
+  qnt <- quantile(x, probs=c(.25, .75), na.rm = TRUE)
+  H <- 1.5 * IQR(x, na.rm = TRUE)
+  !(x >= (qnt[1] - H) & x <= (qnt[2] + H))
+}
+```
+
+## Parametros para Duración
+```{r}
+time_bounds <- master_calidad %>%
+  group_by(tamano) %>%
+  filter(!is_outlier(duration)) %>%  
+  summarise(
+    lower_bound_duration = quantile(duration, 0.6, na.rm = TRUE)*2,
+    upper_bound_duration = quantile(duration, 0.95, na.rm = TRUE)*5,
+    .groups = 'drop'
+  )
+
+head(time_bounds)
+```
+
+# Unificar Parametros
+```{r}
+# Añadir lower_bound_duration y upper_bound_duration a clusters_stats_imputed
+clusters_stats_imputed <- clusters_stats_imputed %>%
+  left_join(time_bounds %>% select(tamano, lower_bound_duration, upper_bound_duration),
+            by = "tamano")
+```
+
+# Parametros Generales
+```{r message=FALSE, warning=FALSE}
+# Calcular las medianas agrupadas por 'tipo' y 'tamano'
+medianas_tipo_tamano <- clusters_stats_imputed %>%
+  group_by(tipo, tamano) %>%
+  summarise(across(where(is.numeric), median, na.rm = TRUE),
+            across(where(is.character), ~"General")) %>%
+  ungroup()
+
+# Calcular las medianas agrupadas solo por 'tamano'
+medianas_tamano <- clusters_stats_imputed %>%
+  group_by(tamano) %>%
+  summarise(across(where(is.numeric), median, na.rm = TRUE),
+            across(where(is.character), ~"General")) %>%
+  ungroup()
+
+# Añadir las filas de resumen de medianas al dataframe original
+parametros_unificados <- bind_rows(clusters_stats_imputed, medianas_tipo_tamano, medianas_tamano)
+
+tail(parametros_unificados)
+```
+
+
+# Exportar parametros
+```{r}
+# Ruta del archivo de destino
+ruta_destino <- "parametros.xlsx"
+
+# Crear un nuevo archivo de Excel con los datos
+wb <- createWorkbook()
+
+# Añadir una hoja de cálculo y escribir los datos en ella
+addWorksheet(wb, "data")
+writeData(wb, sheet = "data", x = parametros_unificados, startRow = 1, startCol = 1, colNames = TRUE)
+
+# Guardar el archivo de Excel
+saveWorkbook(wb, ruta_destino, overwrite = TRUE)
+
+# Mensaje de confirmación
+cat("Datos exportados exitosamente a", ruta_destino)
+```
+
