@@ -1,4 +1,3 @@
-
 ##################### Clean Master Clientes #####################
 
 # Selección de Columnas Necesarias
@@ -43,7 +42,7 @@ master_clientes_normalizado <- master_clientes_seleccionados %>%
     tamano %in% c("3 - MEDIANO", "MEDIANO") ~ "MEDIANO",
     tamano %in% c("4 - GRANDE", "GRANDE") ~ "GRANDE",
     tamano %in% c("5 - EXTRAGRANDE", "EXTRA GRANDE") ~ "EXTRAGRANDE",
-    TRUE ~ tamano  # Esto deja los valores que no coinciden con los anteriores como están
+    TRUE ~ tamano # Esto deja los valores que no coinciden con los anteriores como están
   ))
 
 ## Unificación de AgenciaBI
@@ -70,7 +69,7 @@ master_clientes_normalizado <- master_clientes_normalizado %>%
     grepl("MACHALA", agenciabi, ignore.case = TRUE) ~ "MACHALA",
     grepl("LOJA", agenciabi, ignore.case = TRUE) ~ "LOJA",
     grepl("DURAN", agenciabi, ignore.case = TRUE) ~ "DURAN",
-    TRUE ~ agenciabi  # Esto deja los valores que no coinciden con los anteriores como están
+    TRUE ~ agenciabi # Esto deja los valores que no coinciden con los anteriores como están
   ))
 
 ## Unificación de Region
@@ -82,7 +81,7 @@ master_clientes_normalizado <- master_clientes_normalizado %>%
     grepl("AUSTRO", region, ignore.case = TRUE) ~ "ZONA AUSTRO",
     grepl("GUAYAQUIL", region, ignore.case = TRUE) ~ "ZONA GUAYAQUIL",
     grepl("CENTRO - ORIENTE", region, ignore.case = TRUE) ~ "CENTRO - ORIENTE",
-    TRUE ~ region  # Mantiene cualquier otra región tal como está si no coincide con los patrones anteriores
+    TRUE ~ region # Mantiene cualquier otra región tal como está si no coincide con los patrones anteriores
   ))
 
 ## Unificación de Actividad
@@ -97,8 +96,8 @@ master_clientes_normalizado <- master_clientes_normalizado %>%
     actividad == "D - ENTRETENIMIENTO RECREACION ESPARCIMIENTO" ~ "ENTRETENIMIENTO Y RECREACION",
     actividad == "E - VIAJES TRANSPORTE ALOJAMIENTO" ~ "VIAJES, TRANSPORTE Y ALOJAMIENTO",
     actividad == "F - EDUCACION" ~ "EDUCACION",
-    actividad == "W" ~ "W", 
-    TRUE ~ "OTRA ACTIVIDAD" 
+    actividad == "W" ~ "W",
+    TRUE ~ "OTRA ACTIVIDAD"
   ))
 
 ## Verificación
@@ -119,5 +118,3 @@ summary(master_clientes_normalizado)
 
 # Asumiendo que 'master_clientes_normalizado' ya está creado y listo para ser guardado
 write.csv(master_clientes_normalizado, "Maestro_Clientes.csv", row.names = FALSE)
-
-
